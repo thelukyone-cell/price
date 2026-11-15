@@ -11,9 +11,14 @@
   .toolbar { position:sticky; top:0; z-index:1; background:#fff; border-bottom:1px solid #d9dde3;
              padding:12px 16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
   .toolbar input[type=search] { flex:1 1 220px; padding:8px 10px; font-size:15px; border:1px solid #c5ccd5; border-radius:8px; }
-  .toolbar select, .toolbar button { padding:8px 12px; font-size:15px; border-radius:8px; border:1px solid #c5ccd5; background:#fff; cursor:pointer; }
+  .toolbar select, .toolbar button, .toolbar input[type=number] { padding:8px 12px; font-size:15px; border-radius:8px; border:1px solid #c5ccd5; background:#fff; cursor:pointer; }
   .toolbar button.primary { background:#0a7d4f; color:#fff; border-color:#0a7d4f; }
+  .toolbar input[type=number] { width:70px; cursor:text; }
+  .custom { display:none; align-items:center; gap:6px; font-size:14px; }
+  .custom.on { display:flex; }
   .info { color:#6b7684; font-size:13px; width:100%; }
+  .hint { display:none; background:#fff8e1; border:1px solid #f0d58a; border-radius:8px; padding:8px 10px; font-size:13px; width:100%; line-height:1.4; }
+  .hint.on { display:block; }
   .err { color:#b3261e; padding:16px; }
 
   .sheet { display:flex; flex-wrap:wrap; gap:0; padding:16px; }
@@ -31,33 +36,54 @@
   .tag .qr svg { width:var(--qr); height:var(--qr); display:block; }
   .tag .code { font-size:6pt; color:#555; margin-top:0.5mm; }
 
-  .size-s { --w:50mm; --h:30mm; --qr:18mm; --fs-name:7.5pt; --fs-sub:6pt;  --fs-price:13pt; }
-  .size-m { --w:58mm; --h:40mm; --qr:22mm; --fs-name:9pt;   --fs-sub:7pt;  --fs-price:17pt; }
-  .size-l { --w:70mm; --h:50mm; --qr:26mm; --fs-name:11pt;  --fs-sub:8pt;  --fs-price:22pt; }
+  /* Режим термопринтера: одна этикетка = одна страница, только чёрный цвет */
+  .sheet.label { gap:4mm; }
+  .sheet.label .tag { border:0.3mm solid #bbb; }
+  .sheet.label .tag .sub, .sheet.label .tag .code { color:#000; }
 
-  @page { size:A4; margin:8mm; }
   @media print {
-    body { background:#fff; }
+    html, body { margin:0; padding:0; background:#fff; }
     .toolbar, .tag.off { display:none !important; }
     .sheet { padding:0; }
     .tag { cursor:default; break-inside:avoid; }
+    .sheet.label { display:block; gap:0; }
+    .sheet.label .tag { border:none; break-after:page; page-break-after:always; }
+    .sheet.label .tag.last { break-after:auto; page-break-after:auto; }
   }
 </style>
 </head>
 <body>
 <div class="toolbar">
   <input type="search" id="q" placeholder="Поиск: название, фасовка, ДВ или код">
-  <select id="size">
-    <option value="size-s">Маленький 50×30 мм</option>
-    <option value="size-m" selected>Средний 58×40 мм</option>
-    <option value="size-l">Большой 70×50 мм</option>
+  <select id="mode">
+    <option value="a4">Лист A4</option>
+    <option value="label">Термопринтер этикеток</option>
   </select>
+  <select id="size">
+    <option value="40x30">40×30 мм</option>
+    <option value="50x30">50×30 мм</option>
+    <option value="58x30">58×30 мм</option>
+    <option value="58x40" selected>58×40 мм</option>
+    <option value="58x60">58×60 мм</option>
+    <option value="70x50">70×50 мм</option>
+    <option value="custom">Свой размер…</option>
+  </select>
+  <span class="custom" id="custom">
+    <input type="number" id="cw" min="20" max="120" step="1" value="58"> ×
+    <input type="number" id="ch" min="15" max="120" step="1" value="40"> мм
+  </span>
   <button id="all">Выбрать все</button>
   <button id="none">Снять все</button>
   <button class="primary" onclick="window.print()">Печать</button>
   <div class="info" id="info">Загрузка прайса…</div>
+  <div class="hint" id="hint">
+    <b>Термопринтер:</b> в окне печати выберите ваш принтер этикеток, <b>Поля — Нет</b>, <b>Масштаб — 100%</b>,
+    снимите «Верхние и нижние колонтитулы». В настройках драйвера принтера должен стоять тот же размер этикетки
+    (ширина × высота) и режим «этикетки с промежутком» (gap). Если печать идёт боком — поменяйте ширину и высоту местами.
+  </div>
 </div>
-<div class="sheet size-m" id="sheet"></div>
+<div class="sheet" id="sheet"></div>
+<style id="pagestyle"></style>
 
 <script src="config.js"></script>
 <script src="common.js"></script>
@@ -108,7 +134,50 @@
     tags.forEach(t => t.style.display = !q || t.dataset.search.includes(q) ? "" : "none");
     updateInfo();
   });
-  document.getElementById("size").addEventListener("change", e => { sheet.className = "sheet " + e.target.value; });
+
+  // --- Режим и размер этикетки ---
+  const $ = id => document.getElementById(id);
+  const modeEl = $("mode"), sizeEl = $("size"), cw = $("cw"), ch = $("ch");
+  const store = {
+    get() { try { return JSON.parse(localStorage.getItem("printSettings") || "{}"); } catch (e) { return {}; } },
+    set(v) { try { localStorage.setItem("printSettings", JSON.stringify(v)); } catch (e) {} },
+  };
+  const saved = store.get();
+  if (saved.mode) modeEl.value = saved.mode;
+  if (saved.size && [...sizeEl.options].some(o => o.value === saved.size)) sizeEl.value = saved.size;
+  if (saved.w) cw.value = saved.w;
+  if (saved.h) ch.value = saved.h;
+
+  function applyLayout() {
+    const custom = sizeEl.value === "custom";
+    $("custom").classList.toggle("on", custom);
+    let w, h;
+    if (custom) { w = Math.min(120, Math.max(20, +cw.value || 58)); h = Math.min(120, Math.max(15, +ch.value || 40)); }
+    else [w, h] = sizeEl.value.split("x").map(Number);
+    const label = modeEl.value === "label";
+    // В режиме этикеток уменьшаем высоту на долю мм, чтобы не было пустых этикеток из-за округления.
+    const tagH = label ? h - 0.3 : h;
+    const qr = Math.min(h - 4, w * 0.42);
+    const vars = { "--w": w + "mm", "--h": tagH + "mm", "--qr": qr.toFixed(1) + "mm",
+      "--fs-name": (h * 0.225).toFixed(1) + "pt", "--fs-sub": (h * 0.175).toFixed(1) + "pt", "--fs-price": (h * 0.43).toFixed(1) + "pt" };
+    for (const k in vars) sheet.style.setProperty(k, vars[k]);
+    sheet.className = "sheet" + (label ? " label" : "");
+    $("hint").classList.toggle("on", label);
+    $("pagestyle").textContent = label
+      ? `@page { size:${w}mm ${h}mm; margin:0; }`
+      : `@page { size:A4; margin:8mm; }`;
+    store.set({ mode: modeEl.value, size: sizeEl.value, w: cw.value, h: ch.value });
+  }
+  [modeEl, sizeEl].forEach(el => el.addEventListener("change", applyLayout));
+  [cw, ch].forEach(el => el.addEventListener("input", applyLayout));
+  applyLayout();
+
+  // Последней видимой этикетке не нужен разрыв страницы — иначе в конце выйдет пустая этикетка.
+  window.addEventListener("beforeprint", () => {
+    tags.forEach(t => t.classList.remove("last"));
+    const vis = tags.filter(t => !t.classList.contains("off") && t.style.display !== "none");
+    if (vis.length) vis[vis.length - 1].classList.add("last");
+  });
   document.getElementById("all").onclick = () => { tags.forEach(t => t.classList.remove("off")); updateInfo(); };
   document.getElementById("none").onclick = () => { tags.forEach(t => t.classList.add("off")); updateInfo(); };
   updateInfo();
