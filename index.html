@@ -21,6 +21,7 @@
   .pnote { color:var(--muted); font-size:14px; margin-top:6px; }
   .label { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
   .substance { font-size:18px; margin-bottom:24px; }
+  .desc { font-size:15px; line-height:1.45; margin-bottom:24px; white-space:pre-line; }
   .price { font-size:48px; font-weight:700; color:var(--accent); line-height:1.1; }
   .note { color:var(--muted); font-size:12px; margin-top:24px; }
   .err { color:var(--err); }
@@ -46,7 +47,7 @@
     const it = items.find(x => x.id === id.trim());
     if (!it) { app.innerHTML = shop + `<div class="err">Товар с кодом «${esc(id)}» не найден в прайсе.</div>`; return; }
 
-    const variant = [it.form, it.pack].filter(Boolean).join(" · ");
+    const variant = Price.variant(it), desc = Price.description(it);
     const row = (label, val) => val ? `<div class="label">${label}</div><div class="substance">${esc(val)}</div>` : "";
     document.title = it.name + " — " + Price.formatPrice(it.price);
     app.innerHTML = shop + `
@@ -54,6 +55,7 @@
       ${variant ? `<div class="variant">${esc(variant)}</div>` : ""}
       ${row("Действующее вещество", it.dv)}
       ${row("Назначение", it.pests)}
+      ${desc ? `<div class="label">Описание</div><div class="desc">${esc(desc)}</div>` : ""}
       <div class="label">Цена</div>
       <div class="price">${esc(Price.formatPrice(it.price))}</div>
       ${it.note ? `<div class="pnote">${esc(it.note)}</div>` : ""}

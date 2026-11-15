@@ -55,6 +55,7 @@
 <body>
 <div class="toolbar">
   <input type="search" id="q" placeholder="Поиск: название, фасовка, ДВ или код">
+  <select id="tab"><option value="">Все вкладки</option></select>
   <select id="mode">
     <option value="a4">Лист A4</option>
     <option value="label">Термопринтер этикеток</option>
@@ -108,9 +109,9 @@
   catch (e) { info.innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
 
   sheet.innerHTML = items.map((it, k) => {
-    const variant = [it.form, it.pack].filter(Boolean).join(" · ");
+    const variant = Price.variant(it);
     return `
-    <div class="tag" data-k="${k}" data-search="${esc([it.name, it.id, it.dv, it.form, it.pack].join(" ").toLowerCase())}" title="Клик — исключить из печати">
+    <div class="tag" data-k="${k}" data-tab="${esc(it.sheet)}" data-search="${esc([it.name, it.id, it.dv, it.form, it.pack].join(" ").toLowerCase())}" title="Клик — исключить из печати">
       <div class="txt">
         <div class="name">${esc(it.name)}</div>
         ${variant ? `<div class="var">${esc(variant)}</div>` : ""}
@@ -129,11 +130,17 @@
   }
 
   sheet.addEventListener("click", e => { const t = e.target.closest(".tag"); if (t) { t.classList.toggle("off"); updateInfo(); } });
-  document.getElementById("q").addEventListener("input", e => {
-    const q = e.target.value.trim().toLowerCase();
-    tags.forEach(t => t.style.display = !q || t.dataset.search.includes(q) ? "" : "none");
+  // Фильтр: поиск + вкладка прайса
+  const qEl = document.getElementById("q"), tabEl = document.getElementById("tab");
+  [...new Set(items.map(it => it.sheet).filter(Boolean))].forEach(name => tabEl.add(new Option(name, name)));
+  tabEl.style.display = tabEl.options.length > 2 ? "" : "none";
+  function applyFilter() {
+    const q = qEl.value.trim().toLowerCase(), tab = tabEl.value;
+    tags.forEach(t => t.style.display = (!q || t.dataset.search.includes(q)) && (!tab || t.dataset.tab === tab) ? "" : "none");
     updateInfo();
-  });
+  }
+  qEl.addEventListener("input", applyFilter);
+  tabEl.addEventListener("change", applyFilter);
 
   // --- Режим и размер этикетки ---
   const $ = id => document.getElementById(id);
