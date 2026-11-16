@@ -21,5 +21,5 @@ window.PRICE_CONFIG = {
   RETAIL_LIST: "https://docs.google.com/spreadsheets/d/15hYDqRdVbYqZSoGyRGBtnOmvCuz-wfpcEwvLgqFMPkw/edit",
 
   // Название — показывается вверху страницы товара.
-  SHOP_NAME: "НаДа-ДЕЗ · Пермь",
+  SHOP_NAME: "НаДа-ДЕЗ",
 };
