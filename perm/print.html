@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Печать ценников — Пермь</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:#eef0f3; color:#1c2430; }
+  .toolbar { position:sticky; top:0; z-index:1; background:#fff; border-bottom:1px solid #d9dde3;
+             padding:12px 16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .toolbar input[type=search] { flex:1 1 220px; padding:8px 10px; font-size:15px; border:1px solid #c5ccd5; border-radius:8px; }
+  .toolbar select, .toolbar button, .toolbar input[type=number] { padding:8px 12px; font-size:15px; border-radius:8px; border:1px solid #c5ccd5; background:#fff; cursor:pointer; }
+  .toolbar button.primary { background:#0a7d4f; color:#fff; border-color:#0a7d4f; }
+  .toolbar input[type=number] { width:70px; cursor:text; }
+  .custom { display:none; align-items:center; gap:6px; font-size:14px; }
+  .custom.on { display:flex; }
+  .info { color:#6b7684; font-size:13px; width:100%; }
+  .hint { display:none; background:#fff8e1; border:1px solid #f0d58a; border-radius:8px; padding:8px 10px; font-size:13px; width:100%; line-height:1.4; }
+  .hint.on { display:block; }
+  .err { color:#b3261e; }
+  .sheet > .err { padding:16px; }
+  .toolbar a { font-size:15px; color:#0a7d4f; }
+
+  .sheet { display:flex; flex-wrap:wrap; gap:0; padding:16px; }
+  .tag { width:var(--w); height:var(--h); border:0.3mm dashed #999; background:#fff; padding:2mm;
+         display:flex; gap:2mm; overflow:hidden; cursor:pointer; position:relative; }
+  .tag.off { opacity:.25; }
+  .tag .txt { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .tag .name { font-weight:700; font-size:var(--fs-name); line-height:1.15;
+               display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; }
+  .tag .var { font-size:var(--fs-sub); color:#000; margin-top:0.5mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tag .sub { font-size:var(--fs-sub); color:#333; margin-top:1mm; line-height:1.15;
+              display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  /* Цены: оптовая (из прайса) крупно, розничная (из таблицы розницы) ниже и мельче */
+  .tag .prices { margin-bottom:1.5mm; }
+  .tag .price { font-weight:800; font-size:var(--fs-price); line-height:1; white-space:nowrap; }
+  .tag .retail { font-weight:700; font-size:var(--fs-retail); line-height:1; white-space:nowrap; margin-top:1mm; }
+  .tag .lbl { font-weight:400; font-size:var(--fs-sub); margin-right:1mm; }
+  .tag.noretail .prices::after { content:"нет розничной цены"; display:block; font-size:7pt; color:#b3261e; margin-top:1mm; }
+  .tag .txt { overflow:hidden; }
+  .tag .qr { width:var(--qr); flex:none; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .tag .qr svg { width:var(--qr); height:var(--qr); display:block; }
+  .tag .code { font-size:6pt; color:#555; margin-top:0.5mm; }
+
+  /* Режим термопринтера: одна этикетка = одна страница, только чёрный цвет */
+  .sheet.label { gap:4mm; }
+  .sheet.label .tag { border:0.3mm solid #bbb; }
+  .sheet.label .tag .sub, .sheet.label .tag .code { color:#000; }
+
+  @media print {
+    html, body { margin:0; padding:0; background:#fff; }
+    .toolbar, .tag.off { display:none !important; }
+    .tag.noretail .prices::after { display:none; }
+    .sheet { padding:0; }
+    .tag { cursor:default; break-inside:avoid; }
+    .sheet.label { display:block; gap:0; }
+    .sheet.label .tag { border:none; break-after:page; page-break-after:always; }
+    .sheet.label .tag.last { break-after:auto; page-break-after:auto; }
+  }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <input type="search" id="q" placeholder="Поиск: название, фасовка, ДВ или код">
+  <select id="tab"><option value="">Все вкладки</option></select>
+  <select id="mode">
+    <option value="a4">Лист A4</option>
+    <option value="label">Термопринтер этикеток</option>
+  </select>
+  <select id="size">
+    <option value="40x30">40×30 мм</option>
+    <option value="50x30">50×30 мм</option>
+    <option value="58x30">58×30 мм</option>
+    <option value="58x40" selected>58×40 мм</option>
+    <option value="58x60">58×60 мм</option>
+    <option value="70x50">70×50 мм</option>
+    <option value="custom">Свой размер…</option>
+  </select>
+  <span class="custom" id="custom">
+    <input type="number" id="cw" min="20" max="120" step="1" value="58"> ×
+    <input type="number" id="ch" min="15" max="120" step="1" value="40"> мм
+  </span>
+  <button id="tpl" title="Скачать CSV со всеми товарами и текущими розничными ценами — импортировать в таблицу розницы">Шаблон розницы</button>
+  <a id="retailLink" target="_blank" rel="noopener" style="display:none">Таблица розницы ↗</a>
+  <button id="all">Выбрать все</button>
+  <button id="none">Снять все</button>
+  <button class="primary" onclick="window.print()">Печать</button>
+  <div class="info" id="info">Загрузка прайса…</div>
+  <div class="hint" id="hint">
+    <b>Термопринтер:</b> в окне печати выберите ваш принтер этикеток, <b>Поля — Нет</b>, <b>Масштаб — 100%</b>,
+    снимите «Верхние и нижние колонтитулы». В настройках драйвера принтера должен стоять тот же размер этикетки
+    (ширина × высота) и режим «этикетки с промежутком» (gap). Если печать идёт боком — поменяйте ширину и высоту местами.
+  </div>
+</div>
+<div class="sheet" id="sheet"></div>
+<style id="pagestyle"></style>
+
+<script src="config.js"></script>
+<script src="../common.js?v=2"></script>
+<script>
+(async function () {
+  const sheet = document.getElementById("sheet"), info = document.getElementById("info");
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+  function qrSvg(text) {
+    const qr = qrcode(0, "M");
+    qr.addData(unescape(encodeURIComponent(text)));   // UTF-8 safe
+    qr.make();
+    const n = qr.getModuleCount(), m = 1, size = n + m * 2;
+    let path = "";
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
+      if (qr.isDark(r, c)) path += `M${c + m},${r + m}h1v1h-1z`;
+    return `<svg viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="${path}" fill="#000"/></svg>`;
+  }
+
+  let items;
+  let retailOf;
+  try { [items, retailOf] = await Promise.all([Price.loadPrice(), Price.loadRetail()]); }
+  catch (e) { info.innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
+
+  sheet.innerHTML = items.map((it, k) => {
+    const variant = Price.variant(it), retail = retailOf(it);
+    return `
+    <div class="tag${retail ? "" : " noretail"}" data-k="${k}" data-tab="${esc(it.sheet)}" data-search="${esc([it.name, it.id, it.dv, it.form, it.pack].join(" ").toLowerCase())}" title="Клик — исключить из печати">
+      <div class="txt">
+        <div class="prices">
+          <div class="price"><span class="lbl">Опт.</span>${esc(Price.formatPrice(it.price))}</div>
+          ${retail ? `<div class="retail"><span class="lbl">Розн.</span>${esc(Price.formatPrice(retail.value))}</div>` : ""}
+        </div>
+        <div class="name">${esc(it.name)}</div>
+        ${variant ? `<div class="var">${esc(variant)}</div>` : ""}
+        ${it.dv ? `<div class="sub">ДВ: ${esc(it.dv)}</div>` : ""}
+      </div>
+      <div class="qr">${qrSvg(Price.productUrl(it.id))}<div class="code">${esc(it.id)}</div></div>
+    </div>`;
+  }).join("");
+
+  const tags = [...sheet.children];
+  function updateInfo() {
+    const n = tags.filter(t => !t.classList.contains("off") && t.style.display !== "none").length;
+    info.innerHTML = `Товаров в прайсе: ${items.length}. К печати: <b>${n}</b>. Клик по ценнику — исключить/вернуть. ` +
+      `QR ведут на: ${esc(Price.productUrl(""))}` +
+      (PRICE_CONFIG.RETAIL_LIST ? "" : `<br><span class="err">Таблица розницы не подключена (RETAIL_LIST в perm/config.js).</span>`) +
+      (noRetail ? `<br>Без розничной цены: <b>${noRetail}</b> (помечены красным, на печать пометка не выходит).` : "");
+  }
+  const noRetail = items.filter(it => !retailOf(it)).length;
+
+  // Ссылка на таблицу розницы и шаблон для неё
+  if (PRICE_CONFIG.RETAIL_LIST) Object.assign(document.getElementById("retailLink"), { href: PRICE_CONFIG.RETAIL_LIST }).style.display = "";
+  document.getElementById("tpl").onclick = () => {
+    const q = v => '"' + String(v).replace(/"/g, '""') + '"';
+    const num = v => String(v).replace(".", ",");
+    const lines = [["Код", "Наименование", "Фасовка", "Вкладка", "Оптовая", "Розница"].map(q).join(",")];
+    for (const it of items) {
+      const r = retailOf(it);
+      lines.push([it.id, it.name, Price.variant(it), it.sheet, num(it.price), r ? num(r.value) : ""].map(q).join(","));
+    }
+    const a = document.createElement("a");
+    const BOM = String.fromCharCode(0xFEFF), CRLF = String.fromCharCode(13, 10);
+    a.href = URL.createObjectURL(new Blob([BOM + lines.join(CRLF)], { type: "text/csv;charset=utf-8" }));
+    a.download = "розница-пермь.csv";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  sheet.addEventListener("click", e => { const t = e.target.closest(".tag"); if (t) { t.classList.toggle("off"); updateInfo(); } });
+  // Фильтр: поиск + вкладка прайса
+  const qEl = document.getElementById("q"), tabEl = document.getElementById("tab");
+  [...new Set(items.map(it => it.sheet).filter(Boolean))].forEach(name => tabEl.add(new Option(name, name)));
+  tabEl.style.display = tabEl.options.length > 2 ? "" : "none";
+  function applyFilter() {
+    const q = qEl.value.trim().toLowerCase(), tab = tabEl.value;
+    tags.forEach(t => t.style.display = (!q || t.dataset.search.includes(q)) && (!tab || t.dataset.tab === tab) ? "" : "none");
+    updateInfo();
+  }
+  qEl.addEventListener("input", applyFilter);
+  tabEl.addEventListener("change", applyFilter);
+
+  // --- Режим и размер этикетки ---
+  const $ = id => document.getElementById(id);
+  const modeEl = $("mode"), sizeEl = $("size"), cw = $("cw"), ch = $("ch");
+  const store = {
+    get() { try { return JSON.parse(localStorage.getItem("printSettings") || "{}"); } catch (e) { return {}; } },
+    set(v) { try { localStorage.setItem("printSettings", JSON.stringify(v)); } catch (e) {} },
+  };
+  const saved = store.get();
+  if (saved.mode) modeEl.value = saved.mode;
+  if (saved.size && [...sizeEl.options].some(o => o.value === saved.size)) sizeEl.value = saved.size;
+  if (saved.w) cw.value = saved.w;
+  if (saved.h) ch.value = saved.h;
+
+  function applyLayout() {
+    const custom = sizeEl.value === "custom";
+    $("custom").classList.toggle("on", custom);
+    let w, h;
+    if (custom) { w = Math.min(120, Math.max(20, +cw.value || 58)); h = Math.min(120, Math.max(15, +ch.value || 40)); }
+    else [w, h] = sizeEl.value.split("x").map(Number);
+    const label = modeEl.value === "label";
+    // В режиме этикеток уменьшаем высоту на долю мм, чтобы не было пустых этикеток из-за округления.
+    const tagH = label ? h - 0.3 : h;
+    const qr = Math.min(h - 4, w * 0.42);
+    const vars = { "--w": w + "mm", "--h": tagH + "mm", "--qr": qr.toFixed(1) + "mm",
+      "--fs-name": (h * 0.225).toFixed(1) + "pt", "--fs-sub": (h * 0.175).toFixed(1) + "pt", "--fs-price": (h * 0.43).toFixed(1) + "pt",
+      "--fs-retail": (h * 0.3).toFixed(1) + "pt" };
+    for (const k in vars) sheet.style.setProperty(k, vars[k]);
+    sheet.className = "sheet" + (label ? " label" : "");
+    $("hint").classList.toggle("on", label);
+    $("pagestyle").textContent = label
+      ? `@page { size:${w}mm ${h}mm; margin:0; }`
+      : `@page { size:A4; margin:8mm; }`;
+    store.set({ mode: modeEl.value, size: sizeEl.value, w: cw.value, h: ch.value });
+  }
+  [modeEl, sizeEl].forEach(el => el.addEventListener("change", applyLayout));
+  [cw, ch].forEach(el => el.addEventListener("input", applyLayout));
+  applyLayout();
+
+  // Последней видимой этикетке не нужен разрыв страницы — иначе в конце выйдет пустая этикетка.
+  window.addEventListener("beforeprint", () => {
+    tags.forEach(t => t.classList.remove("last"));
+    const vis = tags.filter(t => !t.classList.contains("off") && t.style.display !== "none");
+    if (vis.length) vis[vis.length - 1].classList.add("last");
+  });
+  document.getElementById("all").onclick = () => { tags.forEach(t => t.classList.remove("off")); updateInfo(); };
+  document.getElementById("none").onclick = () => { tags.forEach(t => t.classList.add("off")); updateInfo(); };
+  updateInfo();
+})();
+</script>
+</body>
+</html>

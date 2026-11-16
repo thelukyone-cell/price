@@ -177,6 +177,34 @@
     return items;
   }
 
+  // Розничные цены (версия для Перми): Google-таблица cfg.RETAIL_LIST, в строке заголовков —
+  // столбцы «Код» и «Розница» (по желанию «Наименование» и «Фасовка»). Цены вписываются вручную.
+  // Возвращает функцию: товар → { value, note } или null.
+  async function loadRetail() {
+    const none = () => null;
+    if (!cfg.RETAIL_LIST) return none;
+    const base = docBase(cfg.RETAIL_LIST);
+    const res = await fetch(base ? base + "/export?format=csv" : cfg.RETAIL_LIST, { cache: "no-store" });
+    if (!res.ok) throw new Error("Таблица розничных цен не загрузилась (HTTP " + res.status + "). Проверь, что доступ к ней открыт по ссылке.");
+    const rows = parseCSV(await res.text());
+    const byId = {}, byName = {};
+    let c = null;
+    for (const r of rows) {
+      if (!c) {
+        const h = r.map(norm), find = re => h.findIndex(x => re.test(x));
+        const k = { id: find(/^код/), retail: find(/^розн/), name: find(/^наименован/), pack: find(/^фасовк/) };
+        if (k.retail >= 0 && (k.id >= 0 || k.name >= 0)) c = k;
+        continue;
+      }
+      const p = parsePrice(r[c.retail]);
+      if (!p) continue;
+      if (c.id >= 0 && clean(r[c.id])) byId[clean(r[c.id])] = p;
+      // запасной вариант — по названию и фасовке (если таблица исказила код, например «12e4» → число)
+      if (c.name >= 0 && clean(r[c.name])) byName[norm(r[c.name]) + "|" + norm(c.pack >= 0 ? r[c.pack] : "")] = p;
+    }
+    return it => byId[it.id] || byName[norm(it.name) + "|" + norm(variant(it))] || null;
+  }
+
   function formatPrice(v) {
     return v.toLocaleString("ru-RU", { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 }) + " ₽";
   }
@@ -193,5 +221,5 @@
   const variant = it => [it.form && it.form.length <= LONG_FORM ? it.form : "", it.pack].filter(Boolean).join(" · ");
   const description = it => [it.form && it.form.length > LONG_FORM ? it.form : "", it.desc].filter(Boolean).join("\n");
 
-  window.Price = { parseCSV, parseList, loadPrice, formatPrice, productUrl, variant, description };
+  window.Price = { parseCSV, parseList, loadPrice, loadRetail, formatPrice, productUrl, variant, description };
 })();
